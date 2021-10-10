@@ -1,36 +1,6 @@
-import abc
-import random
-from typing import Union
-
-import numpy as np
-import torch
+from connect4Agent.agent.agent import Agent
 import torch.nn as nn
-
-
-class Agent:
-    @abc.abstractmethod
-    def forward(self, observation: np.array) -> Union[int, np.array]:
-        pass
-
-
-class ManualAgent(Agent):
-    def forward(self, observation: np.array) -> Union[int, np.array]:
-        valid_actions = np.argwhere(observation["action_mask"] == 1).flatten()
-        choice = -1
-        while choice not in valid_actions:
-            choice = input(f"Select an action out of {valid_actions}")
-            try:
-                choice = int(choice)
-            except Exception:
-                pass
-
-        return int(choice)
-
-
-class RandomAgent(Agent):
-    def forward(self, observation: np.array) -> int:
-        idx = np.argwhere(observation["action_mask"] == 1).flatten().tolist()
-        return random.choice(idx)
+import torch
 
 
 class DQNAgent(Agent, nn.Module):
