@@ -1,33 +1,45 @@
 import collections
-
+from typing import Union
 import numpy as np
 from pettingzoo.classic import connect_four_v3
 from tqdm.cli import tqdm
+import torch
+from connect4Agent.agent import RandomAgent, Agent, DQNAgent
+from connect4Agent.environment import transform_obs
 
-from connect4Agent.agent import RandomAgent
 
-
-def create_buffer(n_samples=1_000) -> collections.deque:
+def create_buffer(n_samples=1_000, agent: Union[None, Agent] = None) -> collections.deque:
     replay_buffer = collections.deque(maxlen=n_samples)
-    agent = RandomAgent()
+    agent = agent or RandomAgent()
     for _ in tqdm(range(n_samples)):
         env = connect_four_v3.env()
         env.reset()
-        next_done = False
-        while not next_done and len(replay_buffer) <= n_samples:
+        done = False
+        i = 0
+        while not done and len(replay_buffer) <= n_samples:
             obs, _, _, _ = env.last()
-            action = agent.forward(obs)
+            if type(agent) is DQNAgent:
+                observation = torch.tensor(
+                    transform_obs(obs["observation"]), dtype=torch.float
+                ).flatten()[None, :]
+                action = int(agent.forward(observation).argmax())
+            else:
+                action = agent.forward(obs)
             env.step(action)
-            next_obs, reward, next_done, _ = env.last()
-            replay_buffer.append(
-                [
-                    obs["observation"].sum(axis=2),
-                    action,
-                    reward,
-                    next_obs["observation"].sum(axis=2),
-                    next_done,
-                ]
-            )
+            next_obs, reward, done, _ = env.last()
+            if i % 2 == 0:
+                replay_buffer.append(
+                    [
+                        transform_obs(obs["observation"]),
+                        action,
+                        -1 if reward < 1 and i % 2 == 0 else reward,
+                        transform_obs(next_obs["observation"]),
+                        done,
+                    ]
+                )
+                i = 1
+            else:
+                i = 0
 
         if len(replay_buffer) == n_samples:
             break

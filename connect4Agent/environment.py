@@ -1,14 +1,27 @@
+import itertools
 import math
 import random
-import itertools
+
 import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from tqdm.cli import tqdm
 from pettingzoo.classic import connect_four_v3
+from tqdm.cli import tqdm
 
 from connect4Agent.agent import Agent, DQNAgent
+
+
+def transform_obs(obs: np.array) -> np.array:
+    match_a1 = np.where(obs[:, :, 0] == 1)
+    match_a2 = np.where(obs[:, :, 1] == 1)
+
+    if match_a1[0].shape[0] > 0:
+        obs[tuple((*match_a1, 0))] = 2
+    if match_a2[0].shape[0] > 0:
+        obs[tuple((*match_a2, 1))] = 3
+
+    return obs
 
 
 def train_dqn_agent(replay_buffer: np.array, config: dict, params: dict) -> DQNAgent:
@@ -17,37 +30,36 @@ def train_dqn_agent(replay_buffer: np.array, config: dict, params: dict) -> DQNA
     target_agent = DQNAgent(**params).clone_from(agent)
 
     opt = optim.Adam(params=agent.parameters())
+    losses = []
 
     for i in tqdm(range(config.get("N_EPISODES"))):
-        # Sample batch
+        # Sample and extract from batch
         batch = np.array(random.sample(replay_buffer, config.get("MINIBATCH_SIZE")))
-
-        # Extract and tensor-ize observations s and s*
         obs = torch.tensor(np.stack(batch[:, 0]), dtype=torch.float)
         obs = obs.reshape(config.get("MINIBATCH_SIZE"), -1)
+        actions = torch.tensor(np.stack(batch[:, 1]), dtype=torch.long)
+        rewards = torch.tensor(np.stack(batch[:, 2]), dtype=torch.float)
         next_obs = torch.tensor(np.stack(batch[:, 3]), dtype=torch.float)
         next_obs = next_obs.reshape(config.get("MINIBATCH_SIZE"), -1)
+        dones = torch.tensor(np.stack(batch[:, 4]), dtype=torch.long)
 
         # Estimate q and q*
-        q_values = agent.forward(obs)
-        next_q_values = target_agent.forward(next_obs)
+        q_values_curr = agent.forward(obs)
+        q_values_next = target_agent.forward(next_obs)
 
         # Compute q'
-        done_idx = torch.tensor(np.stack(batch[:, 4]), dtype=torch.bool)
-        rewards = torch.tensor(np.stack(batch[:, 2]), dtype=torch.float)
-        q_value_mask = torch.zeros(next_q_values.shape[0])
-        q_value_mask[~done_idx] = next_q_values.max(axis=1).values[~done_idx]
-        q_prime = rewards + config.get("DISCOUNT") * q_value_mask
+        q_values_next_max = torch.max(q_values_next, dim=1).values
+        q_value_expct = rewards + config.get("DISCOUNT") * q_values_next_max * (1 - dones)
 
-        # Apply q' to corresponding actions
-        actions = torch.tensor(np.stack(batch[:, 1]), dtype=torch.long)
-        q_values_truth = torch.clone(q_values)
-        q_values_truth[range(config.get("MINIBATCH_SIZE")), actions] = q_prime
+        # Extract the action chose
+        q_values_curr = q_values_curr.gather(1, actions.view(64, 1))
+        q_value_expct = q_value_expct.view(-1, 1)
 
         # Update agent every step, and target_agent every TRG_FREQ steps
         opt.zero_grad()
-        loss = nn.MSELoss()(q_values, q_values_truth)
+        loss = nn.MSELoss()(q_values_curr, q_value_expct)
         loss.backward()
+        losses.append(loss.detach().numpy())
         opt.step()
         if i % config.get("TRG_FREQ") == 0:
             target_agent = DQNAgent(**params).clone_from(agent)
@@ -55,7 +67,9 @@ def train_dqn_agent(replay_buffer: np.array, config: dict, params: dict) -> DQNA
         # Some logging
         if i % config.get("PRINT_FREQ") == 0:
             print("\n")
-            print(f"Episode {i}: Agent loss: {loss}")
+            print(
+                f"Episode {i}: Agent loss: {np.array(losses)[config.get('PRINT_FREQ'):].mean()}"
+            )
             print(f"target_agent updated")
 
     return agent
@@ -74,8 +88,10 @@ def play_match(agent1: Agent, agent2: Agent, n_rounds: int = 3):
             obs, _, _, _ = env.last()
 
             if type(agent) is DQNAgent:
-                obs = torch.tensor(obs["observation"], dtype=torch.float).sum(axis=2).flatten()[None, :]
-                action = int(agent.forward(obs).argmax())
+                observation = torch.tensor(
+                    transform_obs(obs["observation"]), dtype=torch.float
+                ).flatten()[None, :]
+                action = int(agent.forward(observation).argmax())
             else:
                 action = agent.forward(obs)
 
@@ -84,11 +100,13 @@ def play_match(agent1: Agent, agent2: Agent, n_rounds: int = 3):
 
             agent_id = 0 if agent == agent1 else 1
             board.add(action, agent_id=agent_id)
-            # print(board)
+            print(board)
             if next_done:
                 break
 
         print(f"Agent {agent_id} got a reward of {reward}")
+        if not obs["action_mask"][action]:
+            print(board)
 
 
 class Board:
@@ -103,7 +121,7 @@ class Board:
         txt = ""
         for j in range(self.state.shape[0]):
             for i in range(self.state.shape[1]):
-                txt += str(self.state[j, i]) + ' '
+                txt += str(self.state[j, i]) + " "
             txt += "\n"
         txt += "\n"
         return txt

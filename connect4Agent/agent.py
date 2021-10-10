@@ -3,8 +3,8 @@ import random
 from typing import Union
 
 import numpy as np
-import torch.nn as nn
 import torch
+import torch.nn as nn
 
 
 class Agent:
@@ -18,8 +18,13 @@ class ManualAgent(Agent):
         valid_actions = np.argwhere(observation["action_mask"] == 1).flatten()
         choice = -1
         while choice not in valid_actions:
-            choice = input(f"Select an action of out of [{valid_actions}]")
-        return choice
+            choice = input(f"Select an action out of {valid_actions}")
+            try:
+                choice = int(choice)
+            except Exception:
+                pass
+
+        return int(choice)
 
 
 class RandomAgent(Agent):
@@ -33,12 +38,13 @@ class DQNAgent(Agent, nn.Module):
         super(DQNAgent, self).__init__()
 
         self.l1 = nn.Linear(in_shape, hidden_shape)
-        self.l2 = nn.Linear(hidden_shape, out_shape)
+        self.l2 = nn.Linear(hidden_shape, hidden_shape)
+        self.l3 = nn.Linear(hidden_shape, out_shape)
 
     def forward(self, observation: np.array) -> np.array:
         observation = nn.ReLU()(self.l1(observation))
-        observation = self.l2(observation)
-        return observation
+        observation = nn.ReLU()(self.l2(observation))
+        return self.l3(observation)
 
     def clone_from(self, agent: "DQNAgent") -> "DQNAgent":
         for name, param in agent.state_dict().items():
