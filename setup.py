@@ -12,17 +12,13 @@ setuptools.setup(
     author_email="oliver.koenig@dpdhl.com",
     description="",
     install_requires=[
-
+        "torch==1.9.1",
+        "pettingzoo",
+        "pettingzoo[classic]",
+        "pillow" "tqdm",
     ],
     extras_require={
-        "dev": [
-            "black",
-            "flake8",
-            "isort",
-            "pre-commit",
-            "pytest",
-            "gitlint",
-        ],
+        "dev": ["black", "flake8", "isort", "pre-commit", "pytest", "gitlint"],
         # "doc": ["sphinx", "sphinx-rtd-theme", "sphinxcontrib-confluencebuilder"],
     },
     long_description=long_description,
